@@ -17,12 +17,11 @@ if (params.help){
 }
 
 def infoMap = [:]
-/*
-if (params.containsKey("short")){
-    infoMap.put("short", file(params.short).size())
+if (params.containsKey("illumina")){
+    infoMap.put("illumina", file(params.illumina).size())
 }
-if (params.containsKey("long")){
-    infoMap.put("long", file(params.long).size())
+if (params.containsKey("nanopore")){
+    infoMap.put("nanopore", file(params.nanopore).size())
 }
 if (params.containsKey("reference")){
     if (file(params.reference) instanceof LinkedList){
@@ -31,21 +30,20 @@ if (params.containsKey("reference")){
         infoMap.put("fasta", 1)
     }
 }
-*/
-/*
+
 Help.start_info(infoMap, "$workflow.start", "$workflow.profile", version)
 CollectInitialMetadata.print_metadata(workflow)
-*/
+
 /*
 Workflow Start!
 */
 
 // MAIN PARAMETERS
 //      FastQ
-if (params.short instanceof Boolean){
-    exit 1, "'short' must be a path pattern. Provided value:'$params.short'"
+if (params.illumina instanceof Boolean){
+    exit 1, "'illumina' must be a path pattern. Provided value:'$params.illumina'"
     }
-if (!params.short && !params.long){ exit 1, "'short' or 'long' parameter missing"}
+if (!params.illumina && !params.nanopore){ exit 1, "'illumina' and 'nanopore' parameter missing"}
 
 //      Reference
 if (params.reference instanceof Boolean){
@@ -72,14 +70,10 @@ OUT_REFERENCE_TRIPLE.into{IN_MAPPING_CONTIGS; IN_ASSEMBLY_STATS_MAPPING; IN_GAP_
 
 
 // size: -1 -> allows for single and paired-end files to be passed through. Change if necessary
-IN_fastq_raw = Channel.fromFilePairs(params.short, size: -1)
-IN_ONT_raw = Channel.fromFilePairs(params.long, size: -1)
+IN_fastq_raw = Channel.fromFilePairs(params.illumina, size: -1)
+IN_ONT_raw = Channel.fromFilePairs(params.nanopore, size: -1)
 
 if (!IN_fastq_raw.ifEmpty()){
-
-    // size: -1 -> allows for single and paired-end files to be passed through. Change if necessary
-    IN_fastq_raw = Channel.fromFilePairs(params.short, size: -1).ifEmpty {
-    exit 1, "No fastq files provided with pattern:'${params.short}'" }
 
     // SET CHANNELS FOR ASSEMBLERS
     IN_fastq_raw.into{

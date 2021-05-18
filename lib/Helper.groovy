@@ -10,8 +10,8 @@ class Help {
         println ""
         println "         Last Metagenomic Assembler Standing"
         println ""
-        int nsamples = info.short / 2
-        int nsamples_long = info.long
+        int nsamples = info.illumina / 2
+        int nsamples_long = info.nanopore
         println " Input Illumina FastQ        : $nsamples"
         println " Input ONT FastQ             : $nsamples_long"
         println " Reference file              : $info.referece"

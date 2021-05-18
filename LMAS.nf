@@ -17,6 +17,7 @@ if (params.help){
 }
 
 def infoMap = [:]
+/*
 if (params.containsKey("short")){
     infoMap.put("short", file(params.short).size())
 }
@@ -30,6 +31,7 @@ if (params.containsKey("reference")){
         infoMap.put("fasta", 1)
     }
 }
+*/
 
 Help.start_info(infoMap, "$workflow.start", "$workflow.profile", version)
 CollectInitialMetadata.print_metadata(workflow)
@@ -68,7 +70,7 @@ process PROCESS_REFERENCE{
 // SET CHANNELS FOR REFERENCE
 OUT_REFERENCE_TRIPLE.into{IN_MAPPING_CONTIGS; IN_ASSEMBLY_STATS_MAPPING; IN_GAP_STATS; IN_SNP_STATS; COMPILE_REPORTS_REF}
 
-if (params.short){
+if (params.short != ''){
 
     // size: -1 -> allows for single and paired-end files to be passed through. Change if necessary
     IN_fastq_raw = Channel.fromFilePairs(params.short, size: -1).ifEmpty {

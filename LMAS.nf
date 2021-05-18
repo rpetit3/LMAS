@@ -32,10 +32,10 @@ if (params.containsKey("reference")){
     }
 }
 */
-
+/*
 Help.start_info(infoMap, "$workflow.start", "$workflow.profile", version)
 CollectInitialMetadata.print_metadata(workflow)
-
+*/
 /*
 Workflow Start!
 */
@@ -377,7 +377,6 @@ if (params.short != ''){
         }
         """
     }
-
 
     //      VELVETOPTIMIZER
     process VELVETOPTIMIZER {

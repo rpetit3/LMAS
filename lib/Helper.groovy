@@ -10,8 +10,10 @@ class Help {
         println ""
         println "         Last Metagenomic Assembler Standing"
         println ""
-        int nsamples = info.fastq / 2
-        println " Input FastQ                 : $nsamples"
+        int nsamples = info.short / 2
+        int nsamples_long = info.long
+        println " Input Illumina FastQ        : $nsamples"
+        println " Input ONT FastQ             : $nsamples_long"
         println " Reference file              : $info.referece"
         println " Reports are found in        : ./reports"
         println " Results are found in        : ./results"
@@ -50,7 +52,9 @@ class Help {
         println "Basic Usage: "
         println "    nextflow run LMAS.nf"
         println ""
-        println "    --fastq               Path expression to paired-end fastq files. (default: $params.fastq)"
+        println "    --short               Path expression to paired-end Illumina fastq files. (default: $params.short)"
+        println ""
+        println "    --long                Path expression to ONT fastq files. (default: $params.long)"
         println ""
         println "    --reference           Path to triple-genome reference fasta file. (default: $params.reference)"
         println ""

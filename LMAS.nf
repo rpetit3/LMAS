@@ -17,8 +17,11 @@ if (params.help){
 }
 
 def infoMap = [:]
-if (params.containsKey("fastq")){
-    infoMap.put("fastq", file(params.fastq).size())
+if (params.containsKey("short")){
+    infoMap.put("short", file(params.short).size())
+}
+if (params.containsKey("long")){
+    infoMap.put("long", file(params.long).size())
 }
 if (params.containsKey("reference")){
     if (file(params.reference) instanceof LinkedList){
@@ -37,13 +40,10 @@ Workflow Start!
 
 // MAIN PARAMETERS
 //      FastQ
-if (params.fastq instanceof Boolean){
-    exit 1, "'fastq' must be a path pattern. Provided value:'$params.fastq'"
+if (params.short instanceof Boolean){
+    exit 1, "'short' must be a path pattern. Provided value:'$params.short'"
     }
-if (!params.fastq){ exit 1, "'fastq' parameter missing"}
-// size: -1 -> allows for single and paired-end files to be passed through. Change if necessary
-IN_fastq_raw = Channel.fromFilePairs(params.fastq, size: -1).ifEmpty {
-    exit 1, "No fastq files provided with pattern:'${params.fastq}'" }
+if (!params.short && !params.long){ exit 1, "'short' or 'long' parameter missing"}
 
 //      Reference
 if (params.reference instanceof Boolean){
@@ -52,22 +52,6 @@ if (params.reference instanceof Boolean){
 if (!params.reference){ exit 1, "'reference' parameter missing"}
 IN_reference_raw = Channel.fromPath(params.reference).ifEmpty {
     exit 1, "No reference fasta file provided with pattern:'${params.reference}'" }
-
-
-// SET CHANNELS FOR ASSEMBLERS
-IN_fastq_raw.into{
-    IN_PROCESS_READS;
-    IN_BCALM2;
-    IN_GATB_MINIA_PIPELINE;
-    IN_MINIA;
-    IN_MEGAHIT;
-    IN_METASPADES;
-    IN_UNICYCLER;
-    IN_IDBA;
-    IN_SPADES;
-    IN_SKESA;
-    IN_VELVETOPTIMIZER;
-    IN_TO_MAP} //mapping channel - minimap2
 
 // TRIPLE THE REFERENCE REPLICONS
 process PROCESS_REFERENCE{
@@ -84,373 +68,652 @@ process PROCESS_REFERENCE{
 // SET CHANNELS FOR REFERENCE
 OUT_REFERENCE_TRIPLE.into{IN_MAPPING_CONTIGS; IN_ASSEMBLY_STATS_MAPPING; IN_GAP_STATS; IN_SNP_STATS; COMPILE_REPORTS_REF}
 
+if (params.short){
 
-// ASSEMBLERS
-//      BCALM 2
-if ( !params.bcalmKmerSize.toString().isNumber() ){
-    exit 1, "'bcalmKmerSize' parameter must be a number. Provided value: '${params.bcalmKmerSize}'"
-}
+    // size: -1 -> allows for single and paired-end files to be passed through. Change if necessary
+    IN_fastq_raw = Channel.fromFilePairs(params.short, size: -1).ifEmpty {
+    exit 1, "No fastq files provided with pattern:'${params.short}'" }
 
-process PROCESS_READS{
-    tag {sample_id}
+    // SET CHANNELS FOR ASSEMBLERS
+    IN_fastq_raw.into{
+        IN_PROCESS_READS;
+        IN_BCALM2;
+        IN_GATB_MINIA_PIPELINE;
+        IN_MINIA;
+        IN_MEGAHIT;
+        IN_METASPADES;
+        IN_UNICYCLER;
+        IN_IDBA;
+        IN_SPADES;
+        IN_SKESA;
+        IN_VELVETOPTIMIZER;
+        IN_TO_MAP} //mapping channel - minimap2
 
-    input:
-    tuple sample_id, file(fastq) from IN_PROCESS_READS
 
-    output:
-    file("*_reads_report.json") into PROCESS_READS
-
-    script:
-    template "process_reads.py"
-}
-
-process BCALM2 {
-    tag {sample_id}
-    publishDir "results/$sample_id/assembly/bcalm2/"
-
-    input:
-    tuple sample_id, file(fastq) from IN_BCALM2
-    val KmerSize from Channel.value(params.bcalmKmerSize)
-
-    output:
-    tuple sample_id, val("BCALM2"), file("*_BCALM2.fasta") into OUT_BCALM2
-    file(".*version") into BCALM2_VERSION
-
-    script:
-    """
-    ls -1 $fastq  > list_reads
-    bcalm -version | head -n 1 | awk -F ', ' '{print \$2}' | awk -F ' ' '{print \$2}' | awk -F 'v' '{print \$2}' > .${sample_id}_BCALM2_version
-    {
-        bcalm -in list_reads -out ${sample_id} -kmer-size $KmerSize
-        mv ${sample_id}.unitigs.fa  ${sample_id}_BCALM2.fasta
-        echo pass > .status
-    } || {
-        echo fail > .status
-        :> ${sample_id}_BCALM2.fasta
+    // ASSEMBLERS
+    //      BCALM 2
+    if ( !params.bcalmKmerSize.toString().isNumber() ){
+        exit 1, "'bcalmKmerSize' parameter must be a number. Provided value: '${params.bcalmKmerSize}'"
     }
-    # remove temp files
-    rm list_reads *.fa || true
-    """
-}
 
+    process PROCESS_READS{
+        tag {sample_id}
 
-//      GATB MINIA Pipeline
-IN_GATB_kmers = Channel.value(params.gatbkmer)
-IN_GATB_besst_iter = Channel.value(params.gatb_besst_iter)
-GATB_error_correction = params.GATB_error_correction ? "true" : "false"
-IN_error_correction = Channel.value(GATB_error_correction)
+        input:
+        tuple sample_id, file(fastq) from IN_PROCESS_READS
 
-process GATBMINIAPIPELINE {
-    tag {sample_id}
-    publishDir "results/$sample_id/assembly/GATBMiniaPipeline/"
+        output:
+        file("*_reads_report.json") into PROCESS_READS
 
-    input:
-    tuple sample_id, file(fastq_pair) from IN_GATB_MINIA_PIPELINE
-    val kmer_list from IN_GATB_kmers
-    val do_error_correction from GATB_error_correction
-    val besst_iter from IN_GATB_besst_iter
-
-    output:
-    tuple sample_id, val("GATBMiniaPipeline"), file('*_GATBMiniaPipeline.fasta') into OUT_GATB
-    file(".*version") into GATB_VERSION
-
-    script:
-    """
-    echo '' > .${sample_id}_GATBMiniaPipeline_version
-    {
-        if [ $do_error_correction ];
-        then
-            gatb -1 ${fastq_pair[0]} -2 ${fastq_pair[1]} --kmer-sizes ${kmer_list} -o ${sample_id}_GATBMiniaPipeline
-        else
-            gatb -1 ${fastq_pair[0]} -2 ${fastq_pair[1]} --kmer-sizes ${kmer_list} -o ${sample_id}_GATBMiniaPipeline --no-error-correction
-        fi
-
-        link=\$(readlink ${sample_id}_GATBMiniaPipeline.fasta) && rm ${sample_id}_GATBMiniaPipeline.fasta && mv \$link ${sample_id}_GATBMiniaPipeline.fasta
-
-        echo pass > .status
-    } || {
-        echo fail > .status
-        :> ${sample_id}_GATBMiniaPipeline.fasta
+        script:
+        template "process_reads.py"
     }
-    # rm temp dirs
-    rm -r *_GATBMiniaPipeline.lib* *_GATBMiniaPipeline_besst *.unitigs* *contigs.fa *.h5 || true
-    rm *list_reads* || true
-    """
-}
 
+    process BCALM2 {
+        tag {sample_id}
+        publishDir "results/$sample_id/assembly/bcalm2/"
 
-//      MINIA
-IN_MINIA_kmer = Channel.value(params.miniakmer)
+        input:
+        tuple sample_id, file(fastq) from IN_BCALM2
+        val KmerSize from Channel.value(params.bcalmKmerSize)
 
-process MINIA {
-    tag {sample_id}
-    publishDir "results/$sample_id/assembly/MINIA/"
+        output:
+        tuple sample_id, val("BCALM2"), file("*_BCALM2.fasta") into OUT_BCALM2
+        file(".*version") into BCALM2_VERSION
 
-    input:
-    tuple sample_id, file(fastq) from IN_MINIA
-    val kmer from IN_MINIA_kmer
-
-    output:
-    tuple sample_id, val("MINIA"), file('*_minia.fasta') into OUT_MINIA
-    file(".*version") into MINIA_VERSION
-
-    script:
-    """
-    minia -v | head -n 1 | awk -F ' ' '{print \$3}' | awk -F 'v' '{print \$2}' | awk NF > .${sample_id}_MINIA_version
-    {
+        script:
+        """
         ls -1 $fastq  > list_reads
-        minia -in list_reads -out ${sample_id}_minia.fasta -nb-cores $task.cpu
-        mv ${sample_id}_minia.fasta.contigs.fa ${sample_id}_minia.fasta
-        echo pass > .status
-    } || {
-        echo fail > .status
-        :> ${sample_id}_minia.fasta
+        bcalm -version | head -n 1 | awk -F ', ' '{print \$2}' | awk -F ' ' '{print \$2}' | awk -F 'v' '{print \$2}' > .${sample_id}_BCALM2_version
+        {
+            bcalm -in list_reads -out ${sample_id} -kmer-size $KmerSize
+            mv ${sample_id}.unitigs.fa  ${sample_id}_BCALM2.fasta
+            echo pass > .status
+        } || {
+            echo fail > .status
+            :> ${sample_id}_BCALM2.fasta
+        }
+        # remove temp files
+        rm list_reads *.fa || true
+        """
     }
-    rm list_reads *.unitigs.* *.h5 || true
-    """
-}
 
 
-//      MEGAHIT
-IN_megahit_kmers = Channel.value(params.megahitKmers)
+    //      GATB MINIA Pipeline
+    IN_GATB_kmers = Channel.value(params.gatbkmer)
+    IN_GATB_besst_iter = Channel.value(params.gatb_besst_iter)
+    GATB_error_correction = params.GATB_error_correction ? "true" : "false"
+    IN_error_correction = Channel.value(GATB_error_correction)
 
-process MEGAHIT {
-    tag { sample_id }
-    publishDir "results/$sample_id/assembly/MEGAHIT/", pattern: '*_megahit*.fasta'
+    process GATBMINIAPIPELINE {
+        tag {sample_id}
+        publishDir "results/$sample_id/assembly/GATBMiniaPipeline/"
 
-    input:
-    tuple sample_id, file(fastq_pair) from IN_MEGAHIT
-    val kmers from IN_megahit_kmers
+        input:
+        tuple sample_id, file(fastq_pair) from IN_GATB_MINIA_PIPELINE
+        val kmer_list from IN_GATB_kmers
+        val do_error_correction from GATB_error_correction
+        val besst_iter from IN_GATB_besst_iter
 
-    output:
-    tuple sample_id, val("MEGAHIT"), file('*_MEGAHIT.fasta') into OUT_MEGAHIT
-    file(".*version") into MEGAHIT_VERSION
+        output:
+        tuple sample_id, val("GATBMiniaPipeline"), file('*_GATBMiniaPipeline.fasta') into OUT_GATB
+        file(".*version") into GATB_VERSION
 
-    script:
-    """
-    /NGStools/megahit/bin/megahit -v | awk -F ' ' '{print \$2}' | awk -F 'v' '{print \$2}' | awk NF > .${sample_id}_MEGAHIT_version
-    {
-        /NGStools/megahit/bin/megahit --num-cpu-threads $task.cpus -o megahit --k-list $kmers -1 ${fastq_pair[0]} -2 ${fastq_pair[1]}
-        mv megahit/final.contigs.fa ${sample_id}_MEGAHIT.fasta
-        echo pass > .status
-    } || {
-        echo fail > .status
-        :> ${sample_id}_MEGAHIT.fasta
+        script:
+        """
+        echo '' > .${sample_id}_GATBMiniaPipeline_version
+        {
+            if [ $do_error_correction ];
+            then
+                gatb -1 ${fastq_pair[0]} -2 ${fastq_pair[1]} --kmer-sizes ${kmer_list} -o ${sample_id}_GATBMiniaPipeline
+            else
+                gatb -1 ${fastq_pair[0]} -2 ${fastq_pair[1]} --kmer-sizes ${kmer_list} -o ${sample_id}_GATBMiniaPipeline --no-error-correction
+            fi
+
+            link=\$(readlink ${sample_id}_GATBMiniaPipeline.fasta) && rm ${sample_id}_GATBMiniaPipeline.fasta && mv \$link ${sample_id}_GATBMiniaPipeline.fasta
+
+            echo pass > .status
+        } || {
+            echo fail > .status
+            :> ${sample_id}_GATBMiniaPipeline.fasta
+        }
+        # rm temp dirs
+        rm -r *_GATBMiniaPipeline.lib* *_GATBMiniaPipeline_besst *.unitigs* *contigs.fa *.h5 || true
+        rm *list_reads* || true
+        """
     }
-    rm -r megahit || true
-    """
-
-}
 
 
-//      METASPADES
-if ( params.metaspadesKmers.toString().split(" ").size() <= 1 ){
-    if (params.metaspadesKmers.toString() != 'auto'){
-        exit 1, "'metaspadesKmers' parameter must be a sequence of space separated numbers or 'auto'. Provided value: ${params.metaspadesKmers}"
+    //      MINIA
+    IN_MINIA_kmer = Channel.value(params.miniakmer)
+
+    process MINIA {
+        tag {sample_id}
+        publishDir "results/$sample_id/assembly/MINIA/"
+
+        input:
+        tuple sample_id, file(fastq) from IN_MINIA
+        val kmer from IN_MINIA_kmer
+
+        output:
+        tuple sample_id, val("MINIA"), file('*_minia.fasta') into OUT_MINIA
+        file(".*version") into MINIA_VERSION
+
+        script:
+        """
+        minia -v | head -n 1 | awk -F ' ' '{print \$3}' | awk -F 'v' '{print \$2}' | awk NF > .${sample_id}_MINIA_version
+        {
+            ls -1 $fastq  > list_reads
+            minia -in list_reads -out ${sample_id}_minia.fasta -nb-cores $task.cpu
+            mv ${sample_id}_minia.fasta.contigs.fa ${sample_id}_minia.fasta
+            echo pass > .status
+        } || {
+            echo fail > .status
+            :> ${sample_id}_minia.fasta
+        }
+        rm list_reads *.unitigs.* *.h5 || true
+        """
+    }
+
+
+    //      MEGAHIT
+    IN_megahit_kmers = Channel.value(params.megahitKmers)
+
+    process MEGAHIT {
+        tag { sample_id }
+        publishDir "results/$sample_id/assembly/MEGAHIT/", pattern: '*_megahit*.fasta'
+
+        input:
+        tuple sample_id, file(fastq_pair) from IN_MEGAHIT
+        val kmers from IN_megahit_kmers
+
+        output:
+        tuple sample_id, val("MEGAHIT"), file('*_MEGAHIT.fasta') into OUT_MEGAHIT
+        file(".*version") into MEGAHIT_VERSION
+
+        script:
+        """
+        /NGStools/megahit/bin/megahit -v | awk -F ' ' '{print \$2}' | awk -F 'v' '{print \$2}' | awk NF > .${sample_id}_MEGAHIT_version
+        {
+            /NGStools/megahit/bin/megahit --num-cpu-threads $task.cpus -o megahit --k-list $kmers -1 ${fastq_pair[0]} -2 ${fastq_pair[1]}
+            mv megahit/final.contigs.fa ${sample_id}_MEGAHIT.fasta
+            echo pass > .status
+        } || {
+            echo fail > .status
+            :> ${sample_id}_MEGAHIT.fasta
+        }
+        rm -r megahit || true
+        """
+
+    }
+
+
+    //      METASPADES
+    if ( params.metaspadesKmers.toString().split(" ").size() <= 1 ){
+        if (params.metaspadesKmers.toString() != 'auto'){
+            exit 1, "'metaspadesKmers' parameter must be a sequence of space separated numbers or 'auto'. Provided value: ${params.metaspadesKmers}"
+        }
+    }
+    IN_metaspades_kmers = Channel.value(params.metaspadesKmers)
+
+    process METASPADES {
+        tag { sample_id }
+        publishDir "results/$sample_id/assembly/metaSPAdes/"
+
+        input:
+        tuple sample_id, file(fastq_pair) from IN_METASPADES
+        val kmers from IN_metaspades_kmers
+
+        output:
+        tuple sample_id, val("metaSPAdes"), file('*_metaspades.fasta') into OUT_METASPADES
+        file(".*version") into METASPADES_VERSION
+
+        script:
+        """
+        metaspades.py --version &> version
+        cat version | awk -F ' ' '{print \$4}' | awk -F 'v' '{print \$2}' > .${sample_id}_metaSPAdes_version
+        rm version
+        {
+            metaspades.py --only-assembler --threads $task.cpus -k $kmers -1 ${fastq_pair[0]} -2 ${fastq_pair[1]} -o metaspades
+            mv metaspades/contigs.fasta ${sample_id}_metaspades.fasta
+            echo pass > .status
+        } || {
+            echo fail > .status
+            :> ${sample_id}_metaspades.fasta
+        }
+        rm -r metaspades || true
+        """
+    }
+
+
+    //      UNICYCLER
+    process UNICYCLER {
+        tag { sample_id }
+        publishDir "results/$sample_id/assembly/unicycler"
+
+        input:
+        tuple sample_id, file(fastq_pair) from IN_UNICYCLER
+
+        output:
+        tuple sample_id, val("Unicycler"), file('*_unicycler.fasta') into OUT_UNICYCLER
+        file(".*version") into UNICYCLER_VERSION
+
+        script:
+        """
+        unicycler --version | awk -F ' v' '{print \$2}' | awk NF > .${sample_id}_Unicycler_version 
+        {
+            unicycler -t $task.cpus -o . --no_correct --no_pilon -1 ${fastq_pair[0]} -2 ${fastq_pair[1]}
+            mv assembly.fasta ${sample_id}_unicycler.fasta
+            echo pass > .status
+        } || {
+            echo fail > .status
+            :> ${sample_id}_unicycler.fasta
+        }
+        rm *best_spades_graph* *overlaps_removed* *bridges_applied* *final_clean* || true
+        """
+    }
+
+
+    //      SPADES
+    if ( params.spadesKmers.toString().split(" ").size() <= 1 ){
+        if (params.spadesKmers.toString() != 'auto'){
+            exit 1, "'spadesKmers' parameter must be a sequence of space separated numbers or 'auto'. Provided value: ${params.spadesKmers}"
+        }
+    }
+    IN_spades_kmers = Channel.value(params.spadesKmers)
+
+    process SPADES {
+        tag { sample_id }
+        publishDir "results/$sample_id/assembly/SPAdes/", pattern: '*.fasta'
+
+        input:
+        tuple sample_id, file(fastq_pair) from IN_SPADES
+        val kmers from IN_spades_kmers
+
+        output:
+        tuple sample_id, val("SPAdes"), file('*_spades.fasta') into OUT_SPADES
+        file(".*version") into SPADES_VERSION
+
+        script:
+        """
+        spades.py --version &> version
+        cat version | awk -F ' ' '{print \$4}' | awk -F 'v' '{print \$2}' > .${sample_id}_SPAdes_version
+        rm version
+        {
+            spades.py --only-assembler --threads $task.cpus -k $kmers -1 ${fastq_pair[0]} -2 ${fastq_pair[1]} -o spades
+            mv spades/contigs.fasta ${sample_id}_spades.fasta
+        } || {
+            echo fail > .status
+            :> ${sample_id}_spades.fasta
+        }
+        rm -r spades || true
+        """
+    }
+
+
+    //      SKESA
+    process SKESA {
+        tag { sample_id }
+        publishDir "results/$sample_id/assembly/SKESA/"
+
+        input:
+        tuple sample_id, file(fastq_pair) from IN_SKESA
+
+        output:
+        tuple sample_id, val("SKESA"), file('*_skesa.fasta') into OUT_SKESA
+        file(".*version") into SKESA_VERSION
+
+        script:
+        """
+        skesa -v | tail -n 1 | awk -F ' ' '{print \$2}' | awk NF > .${sample_id}_SKESA_version
+        {
+            skesa --cores $task.cpus --memory $task.memory --use_paired_ends --contigs_out ${sample_id}_skesa.fasta --fastq ${fastq_pair[0]} ${fastq_pair[1]}
+            echo pass > .status
+        } || {
+            echo fail > .status
+            :> ${sample_id}_skesa.fasta
+        }
+        """
+    }
+
+
+    //      VELVETOPTIMIZER
+    process VELVETOPTIMIZER {
+        tag { sample_id }
+        publishDir "results/$sample_id/assembly/VelvetOtimiser"
+
+        input:
+        tuple sample_id, file(fastq_pair) from IN_VELVETOPTIMIZER
+
+        output:
+        tuple sample_id, val("VelvetOptimizer"), file('*.fasta') into OUT_VELVETOPTIMIZER
+        file(".*version") into VELVETOPTIMIZER_VERSION
+
+        script:
+        """
+        VelvetOptimiser.pl --version | awk -F ' ' '{print \$2}' | awk NF > .${sample_id}_VelvetOptimiser_version
+        {
+            VelvetOptimiser.pl -v -s $params.velvetoptimizer_hashs -e $params.velvetoptimizer_hashe -t $task.cpus \
+            -f '-shortPaired -fastq.gz -separate ${fastq_pair[0]} ${fastq_pair[1]}'
+            mv auto_data*/contigs.fa ${sample_id}_velvetoptimizer.fasta
+            echo pass > .status
+        } || {
+            echo fail > .status
+            :> ${sample_id}_velvetoptimizer.fasta
+        }
+        rm -r auto_data* || true
+        """
+    }
+
+    //      IDBA
+    process reformat_IDBA {
+        tag { sample_id }
+
+        input:
+        tuple sample_id, file(fastq_pair) from IN_IDBA
+
+        output:
+        tuple sample_id, file('*.fasta') into REFORMAT_IDBA
+
+        script:
+        "reformat.sh in=${fastq_pair[0]} in2=${fastq_pair[1]} out=${sample_id}_reads.fasta"
+    }
+
+    process IDBA {
+        tag { sample_id }
+        publishDir "results/$sample_id/assembly/IDBA-UD/"
+
+        input:
+        tuple sample_id, file(fasta_reads_single) from  REFORMAT_IDBA
+
+        output:
+        tuple sample_id, val("IDBA-UD"), file('*_IDBA-UD.fasta') into OUT_IDBA
+        file(".*version") into IDBA_VERSION
+
+        script:
+        """
+        echo '' > .${sample_id}_IDBA_version
+        {
+            idba_ud -l ${fasta_reads_single} --num_threads $task.cpus -o .
+            mv contig.fa ${sample_id}_IDBA-UD.fasta
+            echo pass > .status
+        } || {
+            echo fail > .status
+            :> ${sample_id}_IDBA-UD.fasta
+        }
+        rm begin align-* contig-* graph-* kmer local-* || true
+        """
+    }
+
+    // VERSION COLLECTION
+    BCALM2_VERSION.mix(GATB_VERSION,
+                        MINIA_VERSION,
+                        MEGAHIT_VERSION,
+                        METASPADES_VERSION,
+                        UNICYCLER_VERSION,
+                        SPADES_VERSION,
+                        SKESA_VERSION,
+                        VELVETOPTIMIZER_VERSION,
+                        IDBA_VERSION).set{ALL_VERSIONS}
+
+    // ASSEMBLY COLLECTION
+    OUT_BCALM2.mix(OUT_GATB,
+                    OUT_MINIA,
+                    OUT_MEGAHIT,
+                    OUT_METASPADES,
+                    OUT_UNICYCLER,
+                    OUT_SPADES,
+                    OUT_SKESA,
+                    OUT_VELVETOPTIMIZER,
+                    OUT_IDBA).set{ALL_ASSEMBLERS}
+
+    ALL_ASSEMBLERS.into{ TO_FILTER; TO_GLOBAL_STATS; TO_READ_MAPPING}
+
+    THRESHOLD = Channel.value(params.mapped_reads_threshold)
+    // READ MAPPING
+    process READ_MAPPING{
+
+        tag { assembler }
+
+        publishDir "results/$sample_id/mapping/reads"
+
+        input:
+        tuple sample_id, assembler, assembly from TO_READ_MAPPING
+        each THRESHOLD
+
+        output:
+        file("*_read_mapping.txt") optional true
+        tuple sample_id, assembler, file("*_read_mapping_report.json") into OUT_READ_MAPPING optional true
+
+        script:
+        template "read_mapping.py"
     }
 }
-IN_metaspades_kmers = Channel.value(params.metaspadesKmers)
 
-process METASPADES {
-    tag { sample_id }
-    publishDir "results/$sample_id/assembly/metaSPAdes/"
+if (params.long){
 
-    input:
-    tuple sample_id, file(fastq_pair) from IN_METASPADES
-    val kmers from IN_metaspades_kmers
+    IN_ONT_raw = Channel.fromFilePairs(params.long, size: -1).ifEmpty {
+    exit 1, "No fastq files provided with pattern:'${params.long}'" }
 
-    output:
-    tuple sample_id, val("metaSPAdes"), file('*_metaspades.fasta') into OUT_METASPADES
-    file(".*version") into METASPADES_VERSION
+    // SET CHANNELS FOR ASSEMBLERS
+    IN_ONT_raw.into{
+        IN_PROCESS_READS_ONT;
+        IN_RAVEN;
+        IN_FLYE;
+        IN_METAFLYE;
+        IN_RA;
+        IN_WTDBG2;
+        IN_TO_MAP_ONT} //mapping channel - minimap2
+    
+    process PROCESS_READS_ONT{
+        tag {sample_id}
 
-    script:
-    """
-    metaspades.py --version &> version
-    cat version | awk -F ' ' '{print \$4}' | awk -F 'v' '{print \$2}' > .${sample_id}_metaSPAdes_version
-    rm version
-    {
-        metaspades.py --only-assembler --threads $task.cpus -k $kmers -1 ${fastq_pair[0]} -2 ${fastq_pair[1]} -o metaspades
-        mv metaspades/contigs.fasta ${sample_id}_metaspades.fasta
-        echo pass > .status
-    } || {
-        echo fail > .status
-        :> ${sample_id}_metaspades.fasta
+        input:
+        tuple sample_id, file(fastq) from IN_PROCESS_READS_ONT
+
+        output:
+        file("*_reads_report_ont.json") into PROCESS_READS
+
+        script:
+        template "process_reads_ont.py"
     }
-    rm -r metaspades || true
-    """
-}
 
+    process RAVEN {
+        tag {sample_id}
+        publishDir "results/$sample_id/assembly/raven/"
 
-//      UNICYCLER
-process UNICYCLER {
-    tag { sample_id }
-    publishDir "results/$sample_id/assembly/unicycler"
+        input:
+        tuple sample_id, file(fastq) from IN_RAVEN
 
-    input:
-    tuple sample_id, file(fastq_pair) from IN_UNICYCLER
+        output:
+        tuple sample_id, val("RAVEN"), file("*_RAVEN.fasta") into OUT_RAVEN
+        file(".*version") into RAVEN_VERSION
 
-    output:
-    tuple sample_id, val("Unicycler"), file('*_unicycler.fasta') into OUT_UNICYCLER
-    file(".*version") into UNICYCLER_VERSION
-
-    script:
-    """
-    unicycler --version | awk -F ' v' '{print \$2}' | awk NF > .${sample_id}_Unicycler_version 
-    {
-        unicycler -t $task.cpus -o . --no_correct --no_pilon -1 ${fastq_pair[0]} -2 ${fastq_pair[1]}
-        mv assembly.fasta ${sample_id}_unicycler.fasta
-        echo pass > .status
-    } || {
-        echo fail > .status
-        :> ${sample_id}_unicycler.fasta
+        script:
+        """
+        raven --version | .${sample_id}_RAVEN_version
+        {
+            raven -t $task.cpus ${fastq} > ${sample_id}_RAVEN.fasta
+            echo pass > .status
+        } || {
+            echo fail > .status
+            :> ${sample_id}_RAVEN.fasta
+        }
+        rm -r raven.cereal || true
+        """
     }
-    rm *best_spades_graph* *overlaps_removed* *bridges_applied* *final_clean* || true
-    """
-}
 
+    process FLYE {
+        tag {sample_id}
+        publishDir "results/$sample_id/assembly/flye/"
 
-//      SPADES
-if ( params.spadesKmers.toString().split(" ").size() <= 1 ){
-    if (params.spadesKmers.toString() != 'auto'){
-        exit 1, "'spadesKmers' parameter must be a sequence of space separated numbers or 'auto'. Provided value: ${params.spadesKmers}"
+        input:
+        tuple sample_id, file(fastq) from IN_FLYE
+
+        output:
+        tuple sample_id, val("FLYE"), file("*_FLYE.fasta") into OUT_FLYE
+        file(".*version") into FLYE_VERSION
+
+        script:
+        """
+        flye --version | .${sample_id}_FLYE_version
+        {
+            flye --nano-raw ${fastq} --out-dir flye_out -t $task.cpus
+            mv flye_out/assembly.fasta ${sample_id}_FLYE.fasta
+            echo pass > .status
+        } || {
+            echo fail > .status
+            :> ${sample_id}_FLYE.fasta
+        }
+        rm -r flye_out || true
+        """
     }
-}
-IN_spades_kmers = Channel.value(params.spadesKmers)
 
-process SPADES {
-    tag { sample_id }
-    publishDir "results/$sample_id/assembly/SPAdes/", pattern: '*.fasta'
+    process METAFLYE {
+        tag {sample_id}
+        publishDir "results/$sample_id/assembly/metaflye/"
 
-    input:
-    tuple sample_id, file(fastq_pair) from IN_SPADES
-    val kmers from IN_spades_kmers
+        input:
+        tuple sample_id, file(fastq) from IN_METAFLYE
 
-    output:
-    tuple sample_id, val("SPAdes"), file('*_spades.fasta') into OUT_SPADES
-    file(".*version") into SPADES_VERSION
+        output:
+        tuple sample_id, val("METAFLYE"), file("*_METAFLYE.fasta") into OUT_METAFLYE
+        file(".*version") into METAFLYE_VERSION
 
-    script:
-    """
-    spades.py --version &> version
-    cat version | awk -F ' ' '{print \$4}' | awk -F 'v' '{print \$2}' > .${sample_id}_SPAdes_version
-    rm version
-    {
-        spades.py --only-assembler --threads $task.cpus -k $kmers -1 ${fastq_pair[0]} -2 ${fastq_pair[1]} -o spades
-        mv spades/contigs.fasta ${sample_id}_spades.fasta
-    } || {
-        echo fail > .status
-        :> ${sample_id}_spades.fasta
+        script:
+        """
+        flye --version | .${sample_id}_METAFLYE_version
+        {
+            flye --nano-raw ${fastq} --meta --out-dir flye_out -t $task.cpus
+            mv flye_out/assembly.fasta ${sample_id}_METAFLYE.fasta
+            echo pass > .status
+        } || {
+            echo fail > .status
+            :> ${sample_id}_METAFLYE.fasta
+        }
+        rm -r flye_out || true
+        """
     }
-    rm -r spades || true
-    """
-}
 
+    /*
+    process CANU{
 
-//      SKESA
-process SKESA {
-    tag { sample_id }
-    publishDir "results/$sample_id/assembly/SKESA/"
+        tag {sample_id}
+        publishDir "results/$sample_id/assembly/canu/"
 
-    input:
-    tuple sample_id, file(fastq_pair) from IN_SKESA
+        input:
+        tuple sample_id, file(fastq) from IN_CANU
 
-    output:
-    tuple sample_id, val("SKESA"), file('*_skesa.fasta') into OUT_SKESA
-    file(".*version") into SKESA_VERSION
+        output:
+        tuple sample_id, val("CANU"), file("*_CANU.fasta") into OUT_CANU
+        file(".*version") into CANU_VERSION
 
-    script:
-    """
-    skesa -v | tail -n 1 | awk -F ' ' '{print \$2}' | awk NF > .${sample_id}_SKESA_version
-    {
-        skesa --cores $task.cpus --memory $task.memory --use_paired_ends --contigs_out ${sample_id}_skesa.fasta --fastq ${fastq_pair[0]} ${fastq_pair[1]}
-        echo pass > .status
-    } || {
-        echo fail > .status
-        :> ${sample_id}_skesa.fasta
+        script:
+        """
+        canu --version | awk -F ' ' '{print \$3}' | awk -F 'v' '{print \$2}' | awk NF > .${sample_id}_CANU_version
+        {
+            canu -nanopore-raw ${fastq} -assemble -p ${sample_id} -d canu_out genomeSize=${params.canu_genomesize}
+            mv canu_out/*.fasta ${sample_id}_CANU.fasta
+            echo pass > .status
+        } || {
+            echo fail > .status
+            :> ${sample_id}_CANU.fasta
+        }
+        rm -r canu_out || true
+        """
     }
-    """
-}
+    */
 
+    /*
+    process SHASTA{
 
-//      VELVETOPTIMIZER
-process VELVETOPTIMIZER {
-    tag { sample_id }
-    publishDir "results/$sample_id/assembly/VelvetOtimiser"
+        tag {sample_id}
+        publishDir "results/$sample_id/assembly/shasta/"
 
-    input:
-    tuple sample_id, file(fastq_pair) from IN_VELVETOPTIMIZER
+        input:
+        tuple sample_id, file(fastq) from IN_SHASTA
 
-    output:
-    tuple sample_id, val("VelvetOptimizer"), file('*.fasta') into OUT_VELVETOPTIMIZER
-    file(".*version") into VELVETOPTIMIZER_VERSION
+        output:
+        tuple sample_id, val("SHASTA"), file("*_SHASTA.fasta") into OUT_SHASTA
+        file(".*version") into SHASTA_VERSION
 
-    script:
-    """
-    VelvetOptimiser.pl --version | awk -F ' ' '{print \$2}' | awk NF > .${sample_id}_VelvetOptimiser_version
-    {
-        VelvetOptimiser.pl -v -s $params.velvetoptimizer_hashs -e $params.velvetoptimizer_hashe -t $task.cpus \
-        -f '-shortPaired -fastq.gz -separate ${fastq_pair[0]} ${fastq_pair[1]}'
-        mv auto_data*/contigs.fa ${sample_id}_velvetoptimizer.fasta
-        echo pass > .status
-    } || {
-        echo fail > .status
-        :> ${sample_id}_velvetoptimizer.fasta
+        script:
+        """
+        echo '' > .${sample_id}_SHASTA_version
+        {
+
+        } || {
+        }
+        """
     }
-    rm -r auto_data* || true
-    """
-}
+    */
 
+    process RA{
 
-//      IDBA
-process reformat_IDBA {
-    tag { sample_id }
+        tag {sample_id}
+        publishDir "results/$sample_id/assembly/ra/"
 
-    input:
-    tuple sample_id, file(fastq_pair) from IN_IDBA
+        input:
+        tuple sample_id, file(fastq) from IN_RA
 
-    output:
-    tuple sample_id, file('*.fasta') into REFORMAT_IDBA
+        output:
+        tuple sample_id, val("RA"), file("*_RA.fasta") into OUT_RA
+        file(".*version") into RA_VERSION
 
-    script:
-    "reformat.sh in=${fastq_pair[0]} in2=${fastq_pair[1]} out=${sample_id}_reads.fasta"
-}
-
-process IDBA {
-    tag { sample_id }
-    publishDir "results/$sample_id/assembly/IDBA-UD/"
-
-    input:
-    tuple sample_id, file(fasta_reads_single) from  REFORMAT_IDBA
-
-    output:
-    tuple sample_id, val("IDBA-UD"), file('*_IDBA-UD.fasta') into OUT_IDBA
-    file(".*version") into IDBA_VERSION
-
-    script:
-    """
-    echo '' > .${sample_id}_IDBA_version
-    {
-        idba_ud -l ${fasta_reads_single} --num_threads $task.cpus -o .
-        mv contig.fa ${sample_id}_IDBA-UD.fasta
-        echo pass > .status
-    } || {
-        echo fail > .status
-        :> ${sample_id}_IDBA-UD.fasta
+        script:
+        """
+        ra --version | awk -F 'v' '{print \$2}' | awk NF > .${sample_id}_RA_version
+        {
+            ra -t $task.cpus -x ont ${fastq} > ${sample_id}_RA.fasta
+            echo pass > .status
+        } || {
+            echo fail > .status
+            :> ${sample_id}_RA.fasta
+        }
+        """
     }
-    rm begin align-* contig-* graph-* kmer local-* || true
-    """
-}
 
-// VERSION COLLECTION
-BCALM2_VERSION.mix(GATB_VERSION,
-                    MINIA_VERSION,
-                    MEGAHIT_VERSION,
-                    METASPADES_VERSION,
-                    UNICYCLER_VERSION,
-                    SPADES_VERSION,
-                    SKESA_VERSION,
-                    VELVETOPTIMIZER_VERSION,
-                    IDBA_VERSION).set{ALL_VERSIONS}
+    process WTDBG2{
+
+        tag {sample_id}
+        publishDir "results/$sample_id/assembly/wtdbg2/"
+
+        input:
+        tuple sample_id, file(fastq) from IN_WTDBG2
+
+        output:
+        tuple sample_id, val("WTDBG2"), file("*_WTDBG2.fasta") into OUT_WTDBG2
+        file(".*version") into WTDBG2_VERSION
+
+        script:
+        """
+        wtdbg2 -V | awk -F ' ' '{print \$2}' | awk NF > .${sample_id}_WTDBG2_version
+        {
+            wtdbg2 -t $task.cpus -i ${fastq} -o ${sample_id}_WTDBG2
+            wtpoa-cns -t $task.cpus -i ${sample_id}_WTDBG2.ctg.lay.gz -fo ${sample_id}_WTDBG2.fasta
+            echo pass > .status
+        } || {
+            echo fail > .status
+            :> ${sample_id}_WTDBG2.fasta
+        }
+        """
+    }
+
+    // VERSION COLLECTION
+    RAVEN_VERSION.mix(FLYE_VERSION,
+                      METAFLYE_VERSION,
+                      RA_VERSION,
+                      WTDBG2_VERSION).set{ALL_VERSIONS}
+
+    // ASSEMBLY COLLECTION
+    OUT_RAVEN.mix(OUT_FLYE,
+                  OUT_METAFLYE,
+                  OUT_RA,
+                  OUT_WTDBG2).set{ALL_ASSEMBLERS_ONT}
+
+    ALL_ASSEMBLERS_ONT.into{ TO_FILTER; TO_GLOBAL_STATS; TO_READ_MAPPING}
+
+}
 
 process PROCESS_VERSION {
 
@@ -462,73 +725,6 @@ process PROCESS_VERSION {
 
     script:
     template "process_versions.py"
-}
-
-// ASSEMBLY COLLECTION
-OUT_BCALM2.mix(OUT_GATB,
-                  OUT_MINIA,
-                  OUT_MEGAHIT,
-                  OUT_METASPADES,
-                  OUT_UNICYCLER,
-                  OUT_SPADES,
-                  OUT_SKESA,
-                  OUT_VELVETOPTIMIZER,
-                  OUT_IDBA).set{ALL_ASSEMBLERS}
-
-ALL_ASSEMBLERS.into{ TO_FILTER; TO_GLOBAL_STATS; TO_READ_MAPPING}
-
-THRESHOLD = Channel.value(params.mapped_reads_threshold)
-// READ MAPPING
-process READ_MAPPING{
-
-    tag { assembler }
-
-    publishDir "results/$sample_id/mapping/reads"
-
-    input:
-    tuple sample_id, assembler, assembly from TO_READ_MAPPING
-    each THRESHOLD
-
-    output:
-    file("*_read_mapping.txt") optional true
-    tuple sample_id, assembler, file("*_read_mapping_report.json") into OUT_READ_MAPPING optional true
-
-    script:
-    template "read_mapping.py"
-}
-
-// ASSEMBLY STATS GLOBAL
-process ASSEMBLY_STATS_GLOBAL {
-    tag { assembler }
-
-    publishDir "results/$sample_id/stats/assembly"
-
-    input:
-    tuple sample_id, assembler, file(assembly), file(read_mapping) from TO_GLOBAL_STATS.join(OUT_READ_MAPPING, by: [0,1])
-
-    output:
-    file "*report.json" into OUT_ASSEMBLY_STATS_GLOBAL_JSON
-    file "*.csv" into OUT_ASSEMBLY_STATS_GLOBAL_TSV
-
-    script:
-    template "assembly_stats_global.py"
-}
-
-
-process PROCESS_ASSEMBLY_STATS_GLOBAL {
-
-    publishDir "results/stats"
-
-    input:
-    file assembly_stats_global_files from OUT_ASSEMBLY_STATS_GLOBAL_TSV.collect()
-    file json_report from OUT_ASSEMBLY_STATS_GLOBAL_JSON.collect()
-
-    output:
-    file "global_assembly_stats.json" into PROCESS_ASSEMBLY_STATS_GLOBAL_OUT
-
-    script:
-    template "process_assembly_stats_global.py"
-
 }
 
 // FILTER ASSEMBLY
@@ -570,6 +766,40 @@ process ASSEMBLY_MAPPING{
 }
 
 OUT_ASSEMBLY_MAPPING.into{ IN_ASSEMBLY_MAPPING_FOR_STATS; IN_GAP_ASSESSMENT; IN_SNP_ASSESSMENT; IN_MISASSEMBLY}
+
+// ASSEMBLY STATS GLOBAL
+process ASSEMBLY_STATS_GLOBAL {
+    tag { assembler }
+
+    publishDir "results/$sample_id/stats/assembly"
+
+    input:
+    tuple sample_id, assembler, file(assembly), file(read_mapping) from TO_GLOBAL_STATS.join(OUT_READ_MAPPING, by: [0,1])
+
+    output:
+    file "*report.json" into OUT_ASSEMBLY_STATS_GLOBAL_JSON
+    file "*.csv" into OUT_ASSEMBLY_STATS_GLOBAL_TSV
+
+    script:
+    template "assembly_stats_global.py"
+}
+
+
+process PROCESS_ASSEMBLY_STATS_GLOBAL {
+
+    publishDir "results/stats"
+
+    input:
+    file assembly_stats_global_files from OUT_ASSEMBLY_STATS_GLOBAL_TSV.collect()
+    file json_report from OUT_ASSEMBLY_STATS_GLOBAL_JSON.collect()
+
+    output:
+    file "global_assembly_stats.json" into PROCESS_ASSEMBLY_STATS_GLOBAL_OUT
+
+    script:
+    template "process_assembly_stats_global.py"
+
+}
 
 process ASSEMBLY_STATS_MAPPING {
 

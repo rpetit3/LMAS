@@ -1,7 +1,7 @@
 #!/usr/bin/env nextflow
 
-import Helper
-import CollectInitialMetadata
+//import Helper
+//import CollectInitialMetadata
 
 // Pipeline version
 if (workflow.commitId){

@@ -491,7 +491,7 @@ if (IN_fastq_raw.count() > 0){
     }
 }
 
-if (IN_ONT_raw.count() > 0)){
+if (IN_ONT_raw.count() > 0){
 
     // SET CHANNELS FOR ASSEMBLERS
     IN_ONT_raw.into{

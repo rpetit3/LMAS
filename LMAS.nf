@@ -70,7 +70,12 @@ process PROCESS_REFERENCE{
 // SET CHANNELS FOR REFERENCE
 OUT_REFERENCE_TRIPLE.into{IN_MAPPING_CONTIGS; IN_ASSEMBLY_STATS_MAPPING; IN_GAP_STATS; IN_SNP_STATS; COMPILE_REPORTS_REF}
 
-if (params.short != ''){
+
+// size: -1 -> allows for single and paired-end files to be passed through. Change if necessary
+IN_fastq_raw = Channel.fromFilePairs(params.short, size: -1)
+IN_ONT_raw = Channel.fromFilePairs(params.long, size: -1)
+
+if (!IN_fastq_raw.ifEmpty()){
 
     // size: -1 -> allows for single and paired-end files to be passed through. Change if necessary
     IN_fastq_raw = Channel.fromFilePairs(params.short, size: -1).ifEmpty {
@@ -491,10 +496,7 @@ if (params.short != ''){
     }
 }
 
-if (params.long){
-
-    IN_ONT_raw = Channel.fromFilePairs(params.long, size: -1).ifEmpty {
-    exit 1, "No fastq files provided with pattern:'${params.long}'" }
+if (!IN_ONT_raw.ifEmpty()){
 
     // SET CHANNELS FOR ASSEMBLERS
     IN_ONT_raw.into{

@@ -74,7 +74,7 @@ OUT_REFERENCE_TRIPLE.into{IN_MAPPING_CONTIGS; IN_ASSEMBLY_STATS_MAPPING; IN_GAP_
 IN_fastq_raw = Channel.fromFilePairs(params.illumina, size: -1)
 IN_ONT_raw = Channel.fromFilePairs(params.nanopore, size: -1)
 
-if (!IN_fastq_raw.ifEmpty()){
+if (IN_fastq_raw.count() > 0){
 
     // SET CHANNELS FOR ASSEMBLERS
     IN_fastq_raw.into{
@@ -491,7 +491,7 @@ if (!IN_fastq_raw.ifEmpty()){
     }
 }
 
-if (!IN_ONT_raw.ifEmpty()){
+if (IN_ONT_raw.count() > 0)){
 
     // SET CHANNELS FOR ASSEMBLERS
     IN_ONT_raw.into{

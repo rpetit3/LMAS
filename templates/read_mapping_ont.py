@@ -45,7 +45,7 @@ if __file__.endswith(".command.sh"):
     SAMPLE_ID = '$sample_id'
     ASSEMBLER = '$assembler'
     ASSEMBLY = '$assembly'
-    FASTQ = '$params.illumina'
+    FASTQ = '$params.nanopore'
     BASEDIR = '$baseDir'
     THRESHOLD = '$THRESHOLD'
     logger.debug("Running {} with parameters:".format(
@@ -71,13 +71,12 @@ def main(sample_id, assembler, assembly, fastq, basedir, threshold):
     # call minimap2
     cli = [
         "minimap2",
-        "--sr",
-        "-k21",
+        "--ax",
+        "map-ont",
         "-N0"
         "--secondary=no",
         assembly,
         reads[0],
-        reads[1],
         ">",
         "{}_{}_read_mapping.paf".format(sample_id, assembler)
     ]
@@ -111,7 +110,7 @@ def main(sample_id, assembler, assembly, fastq, basedir, threshold):
         logger.debug("Number of reads mapping: {}".format(n_reads_mapping))
 
         # get total number of reads
-        n_reads_total = (sum(1 for line in gzip.open(reads[0], 'rb'))/4)+(sum(1 for line in gzip.open(reads[1], 'rb'))/4)
+        n_reads_total = (sum(1 for line in gzip.open(reads[0], 'rb'))/4)
         logger.debug("Number of reads in fastq file: {}".format(n_reads_total))
 
         try:

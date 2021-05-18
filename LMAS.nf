@@ -69,12 +69,13 @@ process PROCESS_REFERENCE{
 // SET CHANNELS FOR REFERENCE
 OUT_REFERENCE_TRIPLE.into{IN_MAPPING_CONTIGS; IN_ASSEMBLY_STATS_MAPPING; IN_GAP_STATS; IN_SNP_STATS; COMPILE_REPORTS_REF}
 
+THRESHOLD = Channel.value(params.mapped_reads_threshold)
 
 // size: -1 -> allows for single and paired-end files to be passed through. Change if necessary
-IN_fastq_raw = Channel.fromFilePairs(params.illumina, size: -1)
-IN_ONT_raw = Channel.fromFilePairs(params.nanopore, size: -1)
 
-if (IN_fastq_raw.count() > 0){
+if (file(params.illumina).size() > 0){
+
+    IN_fastq_raw = Channel.fromFilePairs(params.illumina, size: -1)
 
     // SET CHANNELS FOR ASSEMBLERS
     IN_fastq_raw.into{
@@ -470,7 +471,6 @@ if (IN_fastq_raw.count() > 0){
 
     ALL_ASSEMBLERS.into{ TO_FILTER; TO_GLOBAL_STATS; TO_READ_MAPPING}
 
-    THRESHOLD = Channel.value(params.mapped_reads_threshold)
     // READ MAPPING
     process READ_MAPPING{
 
@@ -489,9 +489,9 @@ if (IN_fastq_raw.count() > 0){
         script:
         template "read_mapping.py"
     }
-}
+} else if (file(params.nanopore).size() > 0){
 
-if (IN_ONT_raw.count() > 0){
+    IN_ONT_raw = Channel.fromFilePairs(params.nanopore, size: -1)
 
     // SET CHANNELS FOR ASSEMBLERS
     IN_ONT_raw.into{
@@ -711,7 +711,27 @@ if (IN_ONT_raw.count() > 0){
 
     ALL_ASSEMBLERS_ONT.into{ TO_FILTER; TO_GLOBAL_STATS; TO_READ_MAPPING}
 
-}
+    // READ MAPPING
+    process READ_MAPPING_ONT{
+
+        tag { assembler }
+
+        publishDir "results/$sample_id/mapping/reads"
+
+        input:
+        tuple sample_id, assembler, assembly from TO_READ_MAPPING
+        each THRESHOLD
+
+        output:
+        file("*_read_mapping.txt") optional true
+        tuple sample_id, assembler, file("*_read_mapping_report.json") into OUT_READ_MAPPING optional true
+
+        script:
+        template "read_mapping_ont.py"
+    }
+
+} else { exit 1, "Nothing was passed"}
+
 
 process PROCESS_VERSION {
 

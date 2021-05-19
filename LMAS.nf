@@ -531,7 +531,7 @@ if (file(params.illumina).size() > 0){
         """
         raven --version | .${sample_id}_RAVEN_version
         {
-            raven -t $task.cpus ${fastq} > ${sample_id}_RAVEN.fasta
+            raven -t $task.cpus ${fastq[0]} > ${sample_id}_RAVEN.fasta
             echo pass > .status
         } || {
             echo fail > .status
@@ -556,7 +556,7 @@ if (file(params.illumina).size() > 0){
         """
         flye --version | .${sample_id}_FLYE_version
         {
-            flye --nano-raw ${fastq} --out-dir flye_out -t $task.cpus
+            flye --nano-raw ${fastq[0]} --out-dir flye_out -t $task.cpus
             mv flye_out/assembly.fasta ${sample_id}_FLYE.fasta
             echo pass > .status
         } || {
@@ -582,7 +582,7 @@ if (file(params.illumina).size() > 0){
         """
         flye --version | .${sample_id}_METAFLYE_version
         {
-            flye --nano-raw ${fastq} --meta --out-dir flye_out -t $task.cpus
+            flye --nano-raw ${fastq[0]} --meta --out-dir flye_out -t $task.cpus
             mv flye_out/assembly.fasta ${sample_id}_METAFLYE.fasta
             echo pass > .status
         } || {
@@ -662,7 +662,7 @@ if (file(params.illumina).size() > 0){
         """
         ra --version | awk -F 'v' '{print \$2}' | awk NF > .${sample_id}_RA_version
         {
-            ra -t $task.cpus -x ont ${fastq} > ${sample_id}_RA.fasta
+            ra -t $task.cpus -x ont ${fastq[0]} > ${sample_id}_RA.fasta
             echo pass > .status
         } || {
             echo fail > .status
@@ -687,7 +687,7 @@ if (file(params.illumina).size() > 0){
         """
         wtdbg2 -V | awk -F ' ' '{print \$2}' | awk NF > .${sample_id}_WTDBG2_version
         {
-            wtdbg2 -t $task.cpus -i ${fastq} -o ${sample_id}_WTDBG2
+            wtdbg2 -t $task.cpus -i ${fastq[0]} -o ${sample_id}_WTDBG2
             wtpoa-cns -t $task.cpus -i ${sample_id}_WTDBG2.ctg.lay.gz -fo ${sample_id}_WTDBG2.fasta
             echo pass > .status
         } || {

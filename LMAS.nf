@@ -529,7 +529,7 @@ if (file(params.illumina).size() > 0){
 
         script:
         """
-        raven --version | .${sample_id}_RAVEN_version
+        raven --version > .${sample_id}_RAVEN_version
         {
             raven -t $task.cpus ${fastq[0]} > ${sample_id}_RAVEN.fasta
             echo pass > .status
@@ -554,7 +554,7 @@ if (file(params.illumina).size() > 0){
 
         script:
         """
-        flye --version | .${sample_id}_FLYE_version
+        flye --version > .${sample_id}_FLYE_version
         {
             flye --nano-raw ${fastq[0]} --out-dir flye_out -t $task.cpus
             mv flye_out/assembly.fasta ${sample_id}_FLYE.fasta
@@ -580,7 +580,7 @@ if (file(params.illumina).size() > 0){
 
         script:
         """
-        flye --version | .${sample_id}_METAFLYE_version
+        flye --version > .${sample_id}_METAFLYE_version
         {
             flye --nano-raw ${fastq[0]} --meta --out-dir flye_out -t $task.cpus
             mv flye_out/assembly.fasta ${sample_id}_METAFLYE.fasta

@@ -45,7 +45,7 @@ if __file__.endswith(".command.sh"):
 def main(sample_id, fastq):
 
     # get total number of reads
-    n_reads_total = (sum(1 for line in gzip.open(fastq, 'rb'))/4)
+    n_reads_total = (sum(1 for line in gzip.open(fastq[0], 'rb'))/4)
 
     with open("{}_reads_report_ont.json".format(sample_id), "w") as json_report:
         json_dic = {
